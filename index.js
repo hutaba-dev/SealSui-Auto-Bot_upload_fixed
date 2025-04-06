@@ -1,6 +1,7 @@
 const { Ed25519Keypair } = require('@mysten/sui.js/keypairs/ed25519');
 const { getFullnodeUrl, SuiClient } = require('@mysten/sui.js/client');
 const { TransactionBlock } = require('@mysten/sui.js/transactions');
+const { decodeSuiPrivateKey } = require('@mysten/sui.js/cryptography');
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
@@ -134,16 +135,29 @@ class ProxyManager {
 }
 
 class SuiAllowlistBot {
-  constructor(privateKeyPhrase, proxyManager = null) {
+  constructor(keyInput, proxyManager = null) {
     this.client = new SuiClient({ url: SUI_RPC_URL });
     this.proxyManager = proxyManager;
-    this.address = this.initializeKeypair(privateKeyPhrase);
+    this.address = this.initializeKeypair(keyInput);
   }
 
-  initializeKeypair(privateKeyPhrase) {
+  initializeKeypair(keyInput) {
     try {
-      this.keypair = Ed25519Keypair.deriveKeypair(privateKeyPhrase);
+      if (keyInput.startsWith('suiprivkey')) {
+        const { secretKey } = decodeSuiPrivateKey(keyInput);
+        this.keypair = Ed25519Keypair.fromSecretKey(secretKey);
+      } else if (keyInput.startsWith('0x') || /^[0-9a-fA-F]{64}$/.test(keyInput)) {
+        const privateKeyBytes = Buffer.from(keyInput.startsWith('0x') ? keyInput.slice(2) : keyInput, 'hex');
+        this.keypair = Ed25519Keypair.fromSecretKey(privateKeyBytes);
+      } else if (/^[A-Za-z0-9+/=]+$/.test(keyInput) && keyInput.length === 44) {
+        const privateKeyBytes = Buffer.from(keyInput, 'base64');
+        this.keypair = Ed25519Keypair.fromSecretKey(privateKeyBytes);
+      } else {
+        this.keypair = Ed25519Keypair.deriveKeypair(keyInput);
+      }
+      
       const address = this.keypair.getPublicKey().toSuiAddress();
+      logger.info(`Initialized wallet with address: ${address}`);
       return address;
     } catch (error) {
       logger.error(`Error initializing keypair: ${error.message}`);
@@ -314,16 +328,16 @@ class SuiAllowlistBot {
     } else {
       imageData = imageSource;
     }
-  
+
     logger.upload(`Uploading blob for ${epochs} epochs`);
     let attempt = 1;
     const delayMs = 5000;
-  
+
     while (attempt <= maxRetries) {
       const randomIndex = Math.floor(Math.random() * PUBLISHER_URLS.length);
       const publisherUrl = `${PUBLISHER_URLS[randomIndex]}?epochs=${epochs}`;
       logger.processing(`Attempt ${attempt}: Using publisher${randomIndex + 1}`);
-  
+
       try {
         const axiosConfig = {};
         if (this.proxyManager) {
@@ -332,7 +346,7 @@ class SuiAllowlistBot {
             axiosConfig.httpsAgent = proxyAgent;
           }
         }
-  
+
         const response = await axios({
           method: 'put',
           url: publisherUrl,
@@ -340,7 +354,7 @@ class SuiAllowlistBot {
           data: imageData,
           ...axiosConfig
         });
-  
+
         let blobId;
         if (response.data && response.data.newlyCreated && response.data.newlyCreated.blobObject) {
           blobId = response.data.newlyCreated.blobObject.blobId;
@@ -351,11 +365,11 @@ class SuiAllowlistBot {
         } else {
           throw new Error(`Invalid response structure from publisher`);
         }
-  
+
         if (!blobId) {
           throw new Error(`Blob ID is missing in response`);
         }
-  
+
         logger.success(`Blob uploaded successfully`);
         logger.result('Blob ID', blobId);
         return blobId;
