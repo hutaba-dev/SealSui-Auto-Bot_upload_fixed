@@ -14,8 +14,12 @@ const SUI_RPC_URL = process.env.SUI_RPC_URL || getFullnodeUrl('testnet');
 const DEFAULT_IMAGE_URL = 'https://picsum.photos/800/600';
 const LOCAL_IMAGE_PATH = path.join(__dirname, 'image.jpg');
 const PUBLISHER_URLS = [
-  'https://seal-example.vercel.app/publisher3/v1/blobs',
+  'https://seal-example.vercel.app/publisher1/v1/blobs',
   'https://seal-example.vercel.app/publisher2/v1/blobs',
+  'https://seal-example.vercel.app/publisher3/v1/blobs',
+  'https://seal-example.vercel.app/publisher4/v1/blobs',
+  'https://seal-example.vercel.app/publisher5/v1/blobs',
+  'https://seal-example.vercel.app/publisher6/v1/blobs',
 ];
 
 const SYMBOLS = {
@@ -316,9 +320,9 @@ class SuiAllowlistBot {
     const delayMs = 5000;
   
     while (attempt <= maxRetries) {
-      const publisherIndex = (attempt % 2 === 1) ? 0 : 1;
-      const publisherUrl = `${PUBLISHER_URLS[publisherIndex]}?epochs=${epochs}`;
-      logger.processing(`Attempt ${attempt}: Using ${publisherIndex === 0 ? 'publisher3' : 'publisher2'}`);
+      const randomIndex = Math.floor(Math.random() * PUBLISHER_URLS.length);
+      const publisherUrl = `${PUBLISHER_URLS[randomIndex]}?epochs=${epochs}`;
+      logger.processing(`Attempt ${attempt}: Using publisher${randomIndex + 1}`);
   
       try {
         const axiosConfig = {};
@@ -337,15 +341,11 @@ class SuiAllowlistBot {
           ...axiosConfig
         });
   
-        //console.log('Publisher Response:', response.data); // Log the response for debugging
-  
         let blobId;
         if (response.data && response.data.newlyCreated && response.data.newlyCreated.blobObject) {
-          // Handle the "newlyCreated" structure
           blobId = response.data.newlyCreated.blobObject.blobId;
           console.log('newlyCreated');
         } else if (response.data && response.data.alreadyCertified) {
-          // Handle the "alreadyCertified" structure
           blobId = response.data.alreadyCertified.blobId;
           console.log('alreadyCertified');
         } else {
