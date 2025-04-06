@@ -310,16 +310,16 @@ class SuiAllowlistBot {
     } else {
       imageData = imageSource;
     }
-
+  
     logger.upload(`Uploading blob for ${epochs} epochs`);
     let attempt = 1;
     const delayMs = 5000;
-
+  
     while (attempt <= maxRetries) {
       const publisherIndex = (attempt % 2 === 1) ? 0 : 1;
       const publisherUrl = `${PUBLISHER_URLS[publisherIndex]}?epochs=${epochs}`;
       logger.processing(`Attempt ${attempt}: Using ${publisherIndex === 0 ? 'publisher3' : 'publisher2'}`);
-
+  
       try {
         const axiosConfig = {};
         if (this.proxyManager) {
@@ -328,7 +328,7 @@ class SuiAllowlistBot {
             axiosConfig.httpsAgent = proxyAgent;
           }
         }
-        
+  
         const response = await axios({
           method: 'put',
           url: publisherUrl,
@@ -336,16 +336,26 @@ class SuiAllowlistBot {
           data: imageData,
           ...axiosConfig
         });
-
-        if (!response.data || !response.data.newlyCreated || !response.data.newlyCreated.blobObject) {
+  
+        //console.log('Publisher Response:', response.data); // Log the response for debugging
+  
+        let blobId;
+        if (response.data && response.data.newlyCreated && response.data.newlyCreated.blobObject) {
+          // Handle the "newlyCreated" structure
+          blobId = response.data.newlyCreated.blobObject.blobId;
+          console.log('newlyCreated');
+        } else if (response.data && response.data.alreadyCertified) {
+          // Handle the "alreadyCertified" structure
+          blobId = response.data.alreadyCertified.blobId;
+          console.log('alreadyCertified');
+        } else {
           throw new Error(`Invalid response structure from publisher`);
         }
-
-        const blobId = response.data.newlyCreated.blobObject.blobId;
+  
         if (!blobId) {
           throw new Error(`Blob ID is missing in response`);
         }
-
+  
         logger.success(`Blob uploaded successfully`);
         logger.result('Blob ID', blobId);
         return blobId;
