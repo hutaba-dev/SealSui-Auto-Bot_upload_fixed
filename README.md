@@ -11,17 +11,19 @@ SealSui-Auto-Bot is a Node.js utility that helps users interact with the Sui SEA
 - ✅ Create allowlist entries and publish content
 - ✅ Add multiple addresses to allowlists
 - ✅ Create service subscription entries
-- ✅ Upload blobs to SEAL publishers
+- ✅ Upload blobs to SEAL publishers with random selection
 - ✅ Support for multiple wallets
 - ✅ Proxy support for requests
 - ✅ Custom or random image uploads
 - ✅ Support for both URL and local image files
+- ✅ Support for Sui private keys (`suiprivkey`), hex, base64, and mnemonic phrases
 
 ## Requirements
 
 - Node.js (v16 or later)
 - npm or yarn
-- A Sui wallet (mnemonic phrase)
+- A Sui wallet (private key or mnemonic phrase)
+
 
 ## Installation
 
@@ -38,7 +40,7 @@ npm install
 
 ## Configuration
 
-1. Create a file named `pk.txt` with your Sui wallet mnemonic phrase OR
+1. Create a file named `pk.txt` with your Sui wallet mnemonic phrase OR Private Key
 2. Create `wallets.txt` with multiple wallet mnemonic phrases (one per line)
 3. (Optional) Create `proxies.txt` with proxy server details (one per line)
 4. (Optional) Place an image file named `image.jpg` in the root directory to use a local image
