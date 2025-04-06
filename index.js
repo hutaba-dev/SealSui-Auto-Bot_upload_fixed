@@ -1,7 +1,6 @@
 const { Ed25519Keypair } = require('@mysten/sui.js/keypairs/ed25519');
 const { getFullnodeUrl, SuiClient } = require('@mysten/sui.js/client');
 const { TransactionBlock } = require('@mysten/sui.js/transactions');
-const { decodeSuiPrivateKey } = require('@mysten/sui.js/cryptography');
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
@@ -15,12 +14,8 @@ const SUI_RPC_URL = process.env.SUI_RPC_URL || getFullnodeUrl('testnet');
 const DEFAULT_IMAGE_URL = 'https://picsum.photos/800/600';
 const LOCAL_IMAGE_PATH = path.join(__dirname, 'image.jpg');
 const PUBLISHER_URLS = [
-  'https://seal-example.vercel.app/publisher1/v1/blobs',
-  'https://seal-example.vercel.app/publisher2/v1/blobs',
   'https://seal-example.vercel.app/publisher3/v1/blobs',
-  'https://seal-example.vercel.app/publisher4/v1/blobs',
-  'https://seal-example.vercel.app/publisher5/v1/blobs',
-  'https://seal-example.vercel.app/publisher6/v1/blobs',
+  'https://seal-example.vercel.app/publisher2/v1/blobs',
 ];
 
 const SYMBOLS = {
@@ -135,29 +130,16 @@ class ProxyManager {
 }
 
 class SuiAllowlistBot {
-  constructor(keyInput, proxyManager = null) {
+  constructor(privateKeyPhrase, proxyManager = null) {
     this.client = new SuiClient({ url: SUI_RPC_URL });
     this.proxyManager = proxyManager;
-    this.address = this.initializeKeypair(keyInput);
+    this.address = this.initializeKeypair(privateKeyPhrase);
   }
 
-  initializeKeypair(keyInput) {
+  initializeKeypair(privateKeyPhrase) {
     try {
-      if (keyInput.startsWith('suiprivkey')) {
-        const { secretKey } = decodeSuiPrivateKey(keyInput);
-        this.keypair = Ed25519Keypair.fromSecretKey(secretKey);
-      } else if (keyInput.startsWith('0x') || /^[0-9a-fA-F]{64}$/.test(keyInput)) {
-        const privateKeyBytes = Buffer.from(keyInput.startsWith('0x') ? keyInput.slice(2) : keyInput, 'hex');
-        this.keypair = Ed25519Keypair.fromSecretKey(privateKeyBytes);
-      } else if (/^[A-Za-z0-9+/=]+$/.test(keyInput) && keyInput.length === 44) {
-        const privateKeyBytes = Buffer.from(keyInput, 'base64');
-        this.keypair = Ed25519Keypair.fromSecretKey(privateKeyBytes);
-      } else {
-        this.keypair = Ed25519Keypair.deriveKeypair(keyInput);
-      }
-      
+      this.keypair = Ed25519Keypair.deriveKeypair(privateKeyPhrase);
       const address = this.keypair.getPublicKey().toSuiAddress();
-      logger.info(`Initialized wallet with address: ${address}`);
       return address;
     } catch (error) {
       logger.error(`Error initializing keypair: ${error.message}`);
@@ -334,9 +316,9 @@ class SuiAllowlistBot {
     const delayMs = 5000;
 
     while (attempt <= maxRetries) {
-      const randomIndex = Math.floor(Math.random() * PUBLISHER_URLS.length);
-      const publisherUrl = `${PUBLISHER_URLS[randomIndex]}?epochs=${epochs}`;
-      logger.processing(`Attempt ${attempt}: Using publisher${randomIndex + 1}`);
+      const publisherIndex = (attempt % 2 === 1) ? 0 : 1;
+      const publisherUrl = `${PUBLISHER_URLS[publisherIndex]}?epochs=${epochs}`;
+      logger.processing(`Attempt ${attempt}: Using ${publisherIndex === 0 ? 'publisher3' : 'publisher2'}`);
 
       try {
         const axiosConfig = {};
@@ -346,7 +328,7 @@ class SuiAllowlistBot {
             axiosConfig.httpsAgent = proxyAgent;
           }
         }
-
+        
         const response = await axios({
           method: 'put',
           url: publisherUrl,
@@ -355,15 +337,21 @@ class SuiAllowlistBot {
           ...axiosConfig
         });
 
+        // 디버깅용: 서버 응답 출력
+        logger.info(`Server response: ${JSON.stringify(response.data)}`);
+
         let blobId;
-        if (response.data && response.data.newlyCreated && response.data.newlyCreated.blobObject) {
+        // newlyCreated 경우
+        if (response.data?.newlyCreated?.blobObject?.blobId) {
           blobId = response.data.newlyCreated.blobObject.blobId;
-          console.log('newlyCreated');
-        } else if (response.data && response.data.alreadyCertified) {
+        }
+        // alreadyCertified 경우
+        else if (response.data?.alreadyCertified?.blobId) {
           blobId = response.data.alreadyCertified.blobId;
-          console.log('alreadyCertified');
-        } else {
-          throw new Error(`Invalid response structure from publisher`);
+          logger.info(`Blob already certified, using existing ID`);
+        }
+        else {
+          throw new Error(`Invalid response structure from publisher: missing blobId`);
         }
 
         if (!blobId) {
@@ -375,6 +363,9 @@ class SuiAllowlistBot {
         return blobId;
       } catch (error) {
         logger.error(`Upload failed on attempt ${attempt}: ${error.message}`);
+        if (error.response) {
+          logger.error(`Server returned: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
+        }
         if (attempt === maxRetries) {
           logger.error(`Max retries (${maxRetries}) reached. Giving up.`);
           throw new Error('Failed to upload blob after maximum retries');
@@ -445,7 +436,8 @@ class SuiAllowlistBot {
   async runAllowlistWorkflow(imageSource = DEFAULT_IMAGE_URL, additionalAddresses = [], count = 1) {
     logger.info(`Starting allowlist workflow for ${count} allowlist(s)`);
     const results = [];
-    
+    const delayMs = 5000;
+
     try {
       for (let i = 1; i <= count; i++) {
         logger.divider();
@@ -464,6 +456,11 @@ class SuiAllowlistBot {
         await this.publishToAllowlist(allowlistId, entryObjectId, blobId);
         
         results.push({ allowlistId, entryObjectId, blobId });
+
+        if (i < count) {
+          logger.info(`Waiting ${delayMs / 1000} seconds before next allowlist task...`);
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
       }
       
       logger.divider();
@@ -478,6 +475,7 @@ class SuiAllowlistBot {
   async runServiceSubscriptionWorkflow(imageSource = DEFAULT_IMAGE_URL, count = 1) {
     logger.info(`Starting service subscription workflow for ${count} service(s)`);
     const results = [];
+    const delayMs = 5000;
     
     try {
       for (let i = 1; i <= count; i++) {
@@ -489,6 +487,11 @@ class SuiAllowlistBot {
         await this.publishToSubscription(sharedObjectId, serviceEntryId, blobId);
         
         results.push({ sharedObjectId, serviceEntryId, blobId });
+
+        if (i < count) {
+          logger.info(`Waiting ${delayMs / 1000} seconds before next service task...`);
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
       }
       
       logger.divider();
@@ -633,6 +636,7 @@ async function main() {
       }
     }
     
+    const walletDelayMs = 5000;
     for (let i = 0; i < wallets.length; i++) {
       logger.divider();
       logger.wallet(`Processing wallet ${i+1} of ${wallets.length}`);
@@ -667,6 +671,11 @@ async function main() {
       } else {
         logger.error('Invalid choice. Please enter 1 or 2.');
         break;
+      }
+
+      if (i < wallets.length - 1) {
+        logger.info(`Waiting ${walletDelayMs / 1000} seconds before next wallet...`);
+        await new Promise(resolve => setTimeout(resolve, walletDelayMs));
       }
     }
     
